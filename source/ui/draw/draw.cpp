@@ -79,6 +79,8 @@ Result_with_string Draw_set_texture_data(Image_data *c2d_image, u8 *buf, int pic
 		pixel_size = 3;
 	} else if (color_format == GPU_RGB565) {
 		pixel_size = 2;
+	} else if (color_format == GPU_RGBA8) {
+		pixel_size = 4;
 	} else {
 		result.code = DEF_ERR_INVALID_ARG;
 		result.string = DEF_ERR_INVALID_ARG_STR;
@@ -139,7 +141,11 @@ Result_with_string Draw_set_texture_data(Image_data *c2d_image, u8 *buf, int pic
 			c3d_offset += increase_list_y[count[1]];
 			count[1]++;
 		}
-	} else if (pixel_size == 3) {
+		c3d_offset += increase_list_y[count[1]];
+		count[1]++;
+	}
+
+	else if (pixel_size == 3) {
 		for (int k = 0; k < y_max; k++) {
 			for (int i = 0; i < x_max; i += 2) {
 				memcpy_asm_4b(&(((u8 *)c2d_image->c2d.tex->data)[c3d_pos + c3d_offset]),
@@ -150,6 +156,24 @@ Result_with_string Draw_set_texture_data(Image_data *c2d_image, u8 *buf, int pic
 				                                         pic_width, pixel_size) +
 				                     4]),
 				       2);
+				c3d_pos += increase_list_x[count[0]];
+				count[0]++;
+			}
+			count[0] = 0;
+			c3d_pos = 0;
+			c3d_offset += increase_list_y[count[1]];
+			count[1]++;
+		}
+	} else if (pixel_size == 4) {
+		for (int k = 0; k < y_max; k++) {
+			for (int i = 0; i < x_max; i += 2) {
+				memcpy_asm_4b(&(((u8 *)c2d_image->c2d.tex->data)[c3d_pos + c3d_offset]),
+				              &(((u8 *)buf)[Draw_convert_to_pos(k + parse_start_height, i + parse_start_width,
+				                                                pic_height, pic_width, pixel_size)]));
+				memcpy_asm_4b(&(((u8 *)c2d_image->c2d.tex->data)[c3d_pos + c3d_offset + 4]),
+				              &(((u8 *)buf)[Draw_convert_to_pos(k + parse_start_height, i + parse_start_width,
+				                                                pic_height, pic_width, pixel_size) +
+				                            4]));
 				c3d_pos += increase_list_x[count[0]];
 				count[0]++;
 			}
@@ -177,8 +201,8 @@ Result_with_string Draw_c2d_image_init(Image_data *c2d_image, int tex_size_x, in
                                        GPU_TEXCOLOR color_format) {
 	Result_with_string result;
 
-	c2d_image->subtex = (Tex3DS_SubTexture *)linearAlloc_concurrent(sizeof(Tex3DS_SubTexture *));
-	c2d_image->c2d.tex = (C3D_Tex *)linearAlloc_concurrent(sizeof(C3D_Tex *));
+	c2d_image->subtex = (Tex3DS_SubTexture *)linearAlloc_concurrent(sizeof(Tex3DS_SubTexture));
+	c2d_image->c2d.tex = (C3D_Tex *)linearAlloc_concurrent(sizeof(C3D_Tex));
 	if (c2d_image->subtex == NULL || c2d_image->c2d.tex == NULL) {
 		linearFree_concurrent(c2d_image->subtex);
 		linearFree_concurrent(c2d_image->c2d.tex);
@@ -290,10 +314,24 @@ void Draw(std::string text, float x, float y, float text_size_x, float text_size
 				C2D_Font cur_font = Extfont_is_extfont_loaded(0) ? system_fonts[prev_font_list_num] : NULL;
 
 				C2D_TextBufClear(c2d_buf);
+				float actual_text_size_x = text_size_x;
+				float actual_text_size_y = text_size_y;
+				float width_scale = 1.0f;
+
 				if (prev_font_list_num == 1) {
 					y_offset = 3 * text_size_y;
+				} else if (prev_font_list_num == 2) {
+					// Korean font scaling (80% visual size, 115% width)
+					y_offset = 4 * text_size_y;
+					actual_text_size_x *= 0.80;
+					actual_text_size_y *= 0.80;
+					width_scale = 1.15f;
 				} else if (prev_font_list_num == 3) {
+					// Traditional Chinese font scaling (80% visual size, 125% width)
 					y_offset = 5 * text_size_y;
+					actual_text_size_x *= 0.80;
+					actual_text_size_y *= 0.80;
+					width_scale = 1.25f;
 				} else {
 					y_offset = 0;
 				}
@@ -315,9 +353,10 @@ void Draw(std::string text, float x, float y, float text_size_x, float text_size
 
 				C2D_TextFontParse(&c2d_text, cur_font, c2d_buf, draw_str.c_str());
 				C2D_TextOptimize(&c2d_text);
-				C2D_TextGetDimensions(&c2d_text, text_size_x, text_size_y, &width, &height);
-				C2D_DrawText(&c2d_text, C2D_WithColor, x, y + y_offset, 0.0, text_size_x, text_size_y, abgr8888);
-				x += width;
+				C2D_TextGetDimensions(&c2d_text, actual_text_size_x, actual_text_size_y, &width, &height);
+				C2D_DrawText(&c2d_text, C2D_WithColor, x, y + y_offset, 0.0, actual_text_size_x, actual_text_size_y,
+				             abgr8888);
+				x += width * width_scale;
 			} else if (prev_font_list_num == 4) {
 				Extfont_draw_extfonts(draw_part_text + consecutive_start, i - consecutive_start, x, y,
 				                      text_size_x * 1.56, text_size_y * 1.56, abgr8888, &width);
@@ -484,11 +523,11 @@ Result_with_string Draw_load_texture(std::string file_name, int sheet_map_num, C
 
 void Draw_touch_pos(void) {
 	if (var_hide_pointer == false) {
-	Hid_info key;
-	Util_hid_query_key_state(&key);
-	if (key.p_touch || key.h_touch) {
-		Draw_texture(var_square_image[0], DEF_DRAW_RED, key.touch_x - 1, key.touch_y - 1, 3, 3);
-	}
+		Hid_info key;
+		Util_hid_query_key_state(&key);
+		if (key.p_touch || key.h_touch) {
+			Draw_texture(var_square_image[0], DEF_DRAW_RED, key.touch_x - 1, key.touch_y - 1, 3, 3);
+		}
 	}
 }
 

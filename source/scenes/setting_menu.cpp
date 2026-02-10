@@ -1,4 +1,4 @@
-﻿// clang-format off
+// clang-format off
 #include "headers.hpp"
 #include <functional>
 #include <regex>
@@ -338,11 +338,16 @@ static void oauth_worker_thread_func(void *) {
 				resource_lock.lock();
 				if (oauth_user_view) {
 					std::string user_name = OAuth::get_user_account_name();
-					std::string channel_id = OAuth::get_user_channel_id();
+					std::string handle = OAuth::get_user_handle();
+					std::string subscriber_count = OAuth::get_user_subscriber_count();
 					std::string photo_url = OAuth::get_user_photo_url();
 					
+					std::vector<std::string> aux_lines;
+					if (!handle.empty()) aux_lines.push_back(handle);
+					if (!subscriber_count.empty()) aux_lines.push_back(subscriber_count);
+					
 					oauth_user_view->set_name(user_name);
-					oauth_user_view->set_auxiliary_lines({channel_id});
+					oauth_user_view->set_auxiliary_lines(aux_lines);
 					oauth_user_view->set_thumbnail_url(photo_url);
 					oauth_user_view->set_height(CHANNEL_ICON_HEIGHT);
 					if (!photo_url.empty()) {
@@ -415,7 +420,17 @@ static void oauth_worker_thread_func(void *) {
 	threadExit(0);
 }
 
+namespace {
+	const std::vector<std::string> languages_ui = {"en", "ja", "de", "fr", "it", "es"};
+	const std::vector<std::string> languages_content = {"en", "ja", "de", "fr", "it", "es"};
 
+	int get_language_index(const std::vector<std::string>& codes, const std::string& lang) {
+		for (size_t i = 0; i < codes.size(); ++i) {
+			if (codes[i] == lang) return i;
+		}
+		return 0;
+	}
+}
 
 void Sem_init(void) {
 	logger.info("settings/init", "Initializing...");
@@ -439,17 +454,19 @@ void Sem_init(void) {
 			(new ScrollView(0, 0, 320, 0))
 				->set_views({
 					// UI language
-					(new SelectorView(0, 0, 320, 35, false))
+					(new GridSelectorView(0, 0, 320, 70, false))
 						->set_texts({
 							"English",
 							"日本語",
 							"Deutsch",
 							"Français",
-							"Italiano"
-						}, var_lang == "ja" ? 1 : var_lang == "de" ? 2 : var_lang == "fr" ? 3 : var_lang == "it" ? 4 : 0)
-						->set_title([](const SelectorView &) { return LOCALIZED(UI_LANGUAGE); })
-						->set_on_change([](const SelectorView &view) {
-							auto next_lang = std::vector<std::string>{"en", "ja", "de", "fr", "it"}[view.selected_button];
+							"Italiano",
+							"Español"
+						}, get_language_index(languages_ui, var_lang))
+						->set_row_counts({3, 3})
+						->set_title([](const GridSelectorView &) { return LOCALIZED(UI_LANGUAGE); })
+						->set_on_change([](const GridSelectorView &view) {
+							auto next_lang = languages_ui[view.selected_button];
 							if (var_lang != next_lang) {
 								var_lang = next_lang;
 								misc_tasks_request(TASK_RELOAD_STRING_RESOURCE);
@@ -457,17 +474,19 @@ void Sem_init(void) {
 							}
 						}),
 					// Content language
-					(new SelectorView(0, 0, 320, 35, false))
+					(new GridSelectorView(0, 0, 320, 70, false))
 						->set_texts({
 							"English",
 							"日本語",
 							"Deutsch",
 							"Français",
-							"Italiano"
-						}, var_lang_content == "ja" ? 1 : var_lang_content == "de" ? 2 : var_lang_content == "fr" ? 3 : var_lang_content == "it" ? 4 : 0)
-						->set_title([](const SelectorView &) { return LOCALIZED(CONTENT_LANGUAGE); })
-						->set_on_change([](const SelectorView &view) {
-							auto next_lang = std::vector<std::string>{"en", "ja", "de", "fr", "it"}[view.selected_button];
+							"Italiano",
+							"Español"
+						}, get_language_index(languages_content, var_lang_content))
+						->set_row_counts({3, 3})
+						->set_title([](const GridSelectorView &) { return LOCALIZED(CONTENT_LANGUAGE); })
+						->set_on_change([](const GridSelectorView &view) {
+							auto next_lang = languages_content[view.selected_button];
 							if (var_lang_content != next_lang) {
 								var_lang_content = next_lang;
 								misc_tasks_request(TASK_SAVE_SETTINGS);
@@ -482,12 +501,26 @@ void Sem_init(void) {
 						->set_on_release([] (const BarView &view) { misc_tasks_request(TASK_SAVE_SETTINGS); }),
 					// Time to turn off LCD
 					(new BarView(0, 0, 320, 40))
-						->set_values(10, 310, var_time_to_turn_off_lcd <= 309 ? var_time_to_turn_off_lcd : 310)
+						->set_values(10, 310, var_time_to_turn_off_lcd != 0 && var_time_to_turn_off_lcd <= 309 ? var_time_to_turn_off_lcd : 310)
 						->set_title([] (const BarView &view) { return LOCALIZED(TIME_TO_TURN_OFF_LCD) + " : " +
 							(view.get_value() <= 309 ? std::to_string((int) view.get_value()) + " " + LOCALIZED(SECONDS) : LOCALIZED(NEVER_TURN_OFF)); })
 						->set_on_release([] (const BarView &view) {
-							var_time_to_turn_off_lcd = view.get_value() <= 309 ? view.get_value() : 1000000000;
+							var_time_to_turn_off_lcd = view.get_value() <= 309 ? view.get_value() : 0;
 							misc_tasks_request(TASK_SAVE_SETTINGS);
+						}),
+					// Screen Toggle Mode
+					(new SelectorView(0, 0, 320, 35, false))
+						->set_texts({
+							(std::function<std::string ()>) []() { return LOCALIZED(SCREEN_TOGGLE_BOTTOM); },
+							(std::function<std::string ()>) []() { return LOCALIZED(SCREEN_TOGGLE_TOP); },
+							(std::function<std::string ()>) []() { return LOCALIZED(SCREEN_TOGGLE_BOTH); }
+						}, var_screen_off_mode)
+						->set_title([](const SelectorView &) { return LOCALIZED(SCREEN_TOGGLE_MODE); })
+						->set_on_change([](const SelectorView &view) {
+							if (var_screen_off_mode != view.selected_button) {
+								var_screen_off_mode = view.selected_button;
+								misc_tasks_request(TASK_SAVE_SETTINGS);
+							}
 						}),
 					// full screen mode
 					(new SelectorView(0, 0, 320, 35, true))
@@ -675,7 +708,7 @@ void Sem_init(void) {
 			(new ScrollView(0, 0, 320, 0))
 				->set_views({
 					(new TextView(0, 0, 320, DEFAULT_FONT_INTERVAL + SMALL_MARGIN * 2))
-						->set_text((std::function<std::string ()>) [] () { return LOCALIZED(UPDATE); })
+						->set_text((std::function<std::string ()>) [] () { return LOCALIZED(UPDATE) + " - " + DEF_CURRENT_APP_VER; })
 						->set_font_size(0.6, DEFAULT_FONT_INTERVAL)
 						->set_text_offset(0, -2),
 					(new TextView(0, 0, 320, DEFAULT_FONT_INTERVAL + SMALL_MARGIN))
@@ -835,8 +868,13 @@ void Sem_init(void) {
 					(new EmptyView(0, 0, 320, SMALL_MARGIN)),
 					(new TextView(10, 0, 120, DEFAULT_FONT_INTERVAL + SMALL_MARGIN * 2))
 						->set_text([] () {
-							return OAuth::oauth_state == OAuth::OAuthState::AUTHENTICATED ? 
-								LOCALIZED(OAUTH_LOGOUT) : LOCALIZED(OAUTH_LOGIN);
+							if (OAuth::oauth_state == OAuth::OAuthState::AUTHENTICATED) {
+								return LOCALIZED(OAUTH_LOGOUT);
+							} else if (OAuth::oauth_state == OAuth::OAuthState::ERROR) {
+								return LOCALIZED(RETRY);
+							} else {
+								return LOCALIZED(OAUTH_LOGIN);
+							}
 						})
 						->set_x_alignment(TextView::XAlign::CENTER)
 						->set_text_offset(0, -2)
@@ -863,6 +901,8 @@ void Sem_init(void) {
 									oauth_user_view->thumbnail_handle = -1;
 									oauth_user_view->set_height(0);
 								}
+							} else if (OAuth::oauth_state == OAuth::OAuthState::ERROR) {
+								OAuth::refresh_access_token();
 							} else if (OAuth::oauth_state == OAuth::OAuthState::NOT_AUTHENTICATED) {
 								OAuth::start_device_flow();
 								if (OAuth::oauth_state == OAuth::OAuthState::AUTHENTICATING) {
@@ -940,12 +980,17 @@ void Sem_init(void) {
 		var_oauth_enabled = true;
 
 		std::string user_name = OAuth::get_user_account_name();
-		std::string channel_id = OAuth::get_user_channel_id();
+		std::string handle = OAuth::get_user_handle();
+		std::string subscriber_count = OAuth::get_user_subscriber_count();
 		std::string photo_url = OAuth::get_user_photo_url();
 		
 		if (oauth_user_view && !user_name.empty()) {
+			std::vector<std::string> aux_lines;
+			if (!handle.empty()) aux_lines.push_back(handle);
+			if (!subscriber_count.empty()) aux_lines.push_back(subscriber_count);
+			
 			oauth_user_view->set_name(user_name);
-			oauth_user_view->set_auxiliary_lines({channel_id});
+			oauth_user_view->set_auxiliary_lines(aux_lines);
 			oauth_user_view->set_thumbnail_url(photo_url);
 			oauth_user_view->set_height(CHANNEL_ICON_HEIGHT);
 			if (!photo_url.empty()) {

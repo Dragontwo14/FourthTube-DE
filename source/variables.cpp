@@ -17,7 +17,7 @@ bool var_show_fps = false;
 bool var_full_screen_mode = false;
 bool var_full_dislike_like_count = false;
 bool var_video_show_debug_info = false;
-int var_player_response = 0; // 0 : Android, 1 : Android VR, 2 : visionOS
+int var_player_response = 1; // 0 : Android, 1 : Android VR, 2 : visionOS (interm 34.1 has 1 as for now 0 is 100% broken 1 is only broken for kids right now, stop gap hence the interm release)
 bool var_video_linear_filter = true;
 double var_forward_buffer_ratio = 0.8;
 u8 var_wifi_state = 0;
@@ -39,6 +39,7 @@ int var_free_ram = 0;
 int var_free_linear_ram = 0;
 int var_lcd_brightness = 100;
 int var_time_to_turn_off_lcd = 150;
+int var_screen_off_mode = 0;
 int var_num_of_app_start = 0;
 int var_system_region = 0;
 bool var_is_new3ds;
